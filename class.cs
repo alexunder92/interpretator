@@ -9,8 +9,9 @@ class ParserException:ApplicationException{
 }
 
 class Parser{
-    enum Types { NONE, DELIMITER, VARIABLE, NUMBER, ARRAY };//Перечисляем типы лексем.
-    enum Errors { SYNTAX, UNBALPARENS, NOEXP, DIVBYZERO }; //Перечисляем типы ошибок.
+    enum Types { NONE, DELIMITER, VARIABLE, NUMBER, ARRAY, SORT, WRITE };//Перечисляем типы лексем.
+    enum Errors { SYNTAX, UNBALPARENS, NOEXP, DIVBYZERO, SYNTAXINARRAY }; //Перечисляем типы ошибок.
+    //enum KeyWords { IF };
 
     string exp;//Ссылка на строку выражения,
     int expIdx;//Текущий индекс в выражении,
@@ -18,15 +19,16 @@ class Parser{
     Types tokType;//Тип лексемы.
 
     //Массив для переменных
+    static int vararr = 100;
     double[] vars=new double[26];
-    double[,] arr = new double[26, 26];
+    double[,] arr = new double[26, vararr];
     public Parser(){
         //Инициализируем переменные нулевыми значениями.
         for(int i=0;i<vars.Length;i++)
         vars[i]=0.0;
 
         for (int i = 0; i < vars.Length; i++)
-            for (int j = 0; j < vars.Length; j++) arr[i, j] = 0;
+            for (int j = 0; j < vararr; j++) arr[i, j] = 0.0;
 
     }
    
@@ -61,12 +63,12 @@ class Parser{
     //Обрабатываем присвоение
     void EvalExp1(out double result)
     {
-        int varIdx;
+        int varIdx,arrIdx;
         Types ttokType;
         string temptoken;
         if (tokType == Types.VARIABLE)
         {
-            //Сохраняем стару юлексему
+            //Сохраняем старую лексему
             temptoken = string.Copy(token);
             ttokType = tokType;
             //Вычисляем индекс переменной
@@ -80,12 +82,63 @@ class Parser{
             }
             else
             {
-                GetToken();//Получаем следующую частьvвыражения ехр.
+                GetToken();//Получаем следующую часть выражения ехр.
                 EvalExp2(out result);
                 vars[varIdx] = result;
                 return;
             }
         }
+
+        if (tokType == Types.ARRAY)
+        {
+            //Сохраняем старую лексему
+            temptoken = string.Copy(token);
+            ttokType = tokType;
+            //Проверяем правильность ввода массива.
+            GetToken();
+            if (token == "")// arr
+            {
+                SyntaxErr(Errors.SYNTAXINARRAY);
+            }
+            else
+            if (!Char.IsLetter(token[0])) SyntaxErr(Errors.SYNTAXINARRAY);
+            else
+            {
+                arrIdx = Char.ToUpper(token[0]) - 'A';
+                GetToken();
+                if (token != "=")
+                {
+                    PutBack();//Возвращаем текущую лексему в поток и восстанавливаем старую
+                    token = String.Copy(temptoken);
+                    tokType = ttokType;
+                }
+                else
+                {
+                    GetToken();//Получаем следующую часть массива.
+                    if (token == "[")
+                    {
+                        //Заполняем массив элементами и считаем количество элементов в массиве.
+                        GetToken();
+                        while (tokType == Types.NUMBER&&token!="]")
+                        {
+                            arr[arrIdx, 0]++;// количество элементов в массиве будем хранить в нулевом элементе массива
+                            EvalExp2(out result);
+                            arr[arrIdx, (int)arr[arrIdx, 0]] = result;
+                            GetToken();
+                            if (token == ";") GetToken(); //получаем следующее число
+                      
+                        }
+                        if (token != "") SyntaxErr(Errors.SYNTAXINARRAY);// после элемента массива непонятный символ
+
+                    }
+                    else SyntaxErr(Errors.SYNTAXINARRAY);
+                }
+                
+
+
+            }
+        }
+
         EvalExp2(out result);
     }
 
@@ -208,7 +261,7 @@ void EvalExp7(out double result)
 else Atom(out result);
 }
 
-//Получаем значение числа,
+//Получаем значение числа или переменной
 void Atom(out double result)
 {
     switch(tokType){
@@ -225,6 +278,8 @@ void Atom(out double result)
             result=FindVar(token);
             GetToken();
             return;
+
+
         default:
         result=0.0;
         SyntaxErr(Errors.SYNTAX);
@@ -236,16 +291,16 @@ void Atom(out double result)
 double FindVar(string vname)
 {
     if(!Char.IsLetter(vname[0])){
-SyntaxErr(Errors.SYNTAX);
-return 0.0;
-}
+        SyntaxErr(Errors.SYNTAX);
+        return 0.0;
+    }
 return vars[Char.ToUpper(vname[0])-'A'];
 }
 
 //Возвращаем лексему во входной поток.
 void PutBack()
 {
-for(int i=0;i<token.Length;i++)expIdx--;
+    for(int i=0;i<token.Length;i++)expIdx--;
 }
 
 //Обрабатываем синтаксическую ошибку.
@@ -255,7 +310,8 @@ void SyntaxErr(Errors error)
     "Синтаксическая ошибка",
     "Дисбаланс скобок",
     "Выражение отсутствует",
-    "Деление на нуль"
+    "Деление на нуль",
+    "Синтаксическая ошибка в задании массива"
     };
 
     throw new ParserException(err[(int) error]);
@@ -282,24 +338,31 @@ void GetToken()
             while(!IsDelim(exp[expIdx])){
                 token+=exp[expIdx];
                 expIdx++;
+                if (token.IndexOf("arr") != -1)
+                { tokType = Types.ARRAY; break; }
+                else if (token.IndexOf("sort") != -1)
+                { tokType = Types.SORT; break; }
+                else if (token.IndexOf("write") != -1)
+                { tokType = Types.WRITE; break; }
+                else tokType = Types.VARIABLE;
                 if(expIdx>=exp.Length) break;
             }
-            tokType=Types.VARIABLE;
+           
         }
-else if(Char.IsDigit(exp[expIdx])){//Это число?
-    while(!IsDelim(exp[expIdx])){
-        token+=exp[expIdx];
-        expIdx++;
-        if(expIdx>=exp.Length) break;
-    }
-    tokType=Types.NUMBER;
+    else if(Char.IsDigit(exp[expIdx])){//Это число?
+        while(!IsDelim(exp[expIdx])){
+            token+=exp[expIdx];
+            expIdx++;
+            if(expIdx>=exp.Length) break;
+        }
+        tokType=Types.NUMBER;
     }
 }
 
 //Метод возвращает значение true,если символ с является разделителем
     bool IsDelim(char с)
     {
-        if(("+-/*%^=()&".IndexOf(с)!=-1))
+        if(("+-/*%^=()&[];".IndexOf(с)!=-1))
         return true;
     return false;
     }
